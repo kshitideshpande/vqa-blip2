@@ -12,7 +12,7 @@ Upload any image, ask a question in plain English, get an answer.
 
 | Image | Question | Answer |
 |---|---|---|
-| ![Beagle](static/beagle.png) | Which breed of dog is this? | beagle |
+| ![Beagle](static/breed.png) | Which breed of dog is this? | beagle |
 | ![Chart](static/chart.png) | Can you identify the trend shown in this chart? | npls and loan loss reserves |
 
 ---
