@@ -13,22 +13,26 @@ from transformers import Blip2ForConditionalGeneration, Blip2Processor
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
+    force=True,
 )
 logger = logging.getLogger(__name__)
 
 MODEL_ID = "Salesforce/blip2-opt-2.7b"
 MAX_NEW_TOKENS = 100
 DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
-DTYPE = torch.float16 if DEVICE == "cuda" else torch.float32
+# bfloat16 halves memory on CPU (~15 GB -> ~7.5 GB), so the model fits on free Spaces hardware
+DTYPE = torch.float16 if DEVICE == "cuda" else torch.bfloat16
 
 
 def load_model() -> tuple[Blip2Processor, Blip2ForConditionalGeneration]:
     logger.info("Loading processor from %s ...", MODEL_ID)
     processor = Blip2Processor.from_pretrained(MODEL_ID)
 
-    logger.info("Loading model on %s ...", DEVICE)
+    logger.info("Loading model on %s (%s) ...", DEVICE, DTYPE)
     model = Blip2ForConditionalGeneration.from_pretrained(
-        MODEL_ID, torch_dtype=DTYPE
+        MODEL_ID,
+        torch_dtype=DTYPE,
+        low_cpu_mem_usage=True,  # avoids holding two copies of the weights in RAM while loading
     ).to(DEVICE)
     model.eval()
 
@@ -54,7 +58,8 @@ def answer_question(image: Image.Image | None, question: str) -> str:
     prompt = f"Question: {question.strip()} Answer:"
 
     try:
-        inputs = processor(image, prompt, return_tensors="pt").to(DEVICE)
+        # Cast pixel values to the model's dtype; otherwise float32 inputs clash with bf16/fp16 weights
+        inputs = processor(image.convert("RGB"), prompt, return_tensors="pt").to(DEVICE, DTYPE)
         with torch.no_grad():
             generated_ids = model.generate(**inputs, max_new_tokens=MAX_NEW_TOKENS)
         raw_output = processor.batch_decode(generated_ids, skip_special_tokens=True)[0]
@@ -62,7 +67,7 @@ def answer_question(image: Image.Image | None, question: str) -> str:
         logger.info("Q: %s | A: %s", question, answer)
         return answer if answer else "No answer generated — try rephrasing your question."
     except Exception as e:
-        logger.error("Inference failed: %s", e)
+        logger.exception("Inference failed: %s", e)
         return "Something went wrong. Please try a different image or question."
 
 
